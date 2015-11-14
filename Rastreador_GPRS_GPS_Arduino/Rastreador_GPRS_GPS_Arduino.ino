@@ -3,10 +3,20 @@
 #include <SoftwareSerial.h>
 #include <SFE_MG2639_CellShield.h>
 
+//Macro usada para hacer el casting necesario para que las funciones que emplean el
+//tipo __FlashStringHelper acepten correctamente las cadenas almacenadas en la
+//memoria flash declaradas con PROGMEM
+#define FSH(cadena_pgm) reinterpret_cast<const __FlashStringHelper *>(cadena_pgm)
+
 //Tiempo de envio de datos al servidor en milisegundos
 const unsigned long tiempoActualizacion = 10 * 1000;
 
 unsigned long tUltimaAct = -tiempoActualizacion;
+
+static PROGMEM const char servidor[] = "alsw.net";
+static PROGMEM const char pagina[] = "/trackid/posicion2.php";
+
+char bufferTexto[256];
 
 AltSoftSerial serialGPS;
 TinyGPS gps;
@@ -42,11 +52,15 @@ void setup() {
     delay(2000);
   }
   Serial.println(F("OK"));
-
-  //Se 
 }
 
 void loop() {
+
+  while (gprs.available())
+  {
+    Serial.write(gprs.read());
+  }
+
   //Se actualiza la informacion del modulo GPS
   actualizarGPS();
 
@@ -81,14 +95,39 @@ void actualizarGPS() {
 
 void enviarPosicion() {
   long lat, lon;
-  char cadenaNum[16];
+  long lat_i, lat_f, lon_i, lon_f;
+  int posBuf;
+  
   gps.get_position(&lat, &lon, NULL);
-  Serial.print(F("Posicion Actual: LAT = "));
-  sprintf(cadenaNum, " % li. % 06li", lat / 1000000, abs(lat % 1000000));
-  Serial.print(cadenaNum);
-  Serial.print(F(", LON = "));
-  sprintf(cadenaNum, " % li. % 06li", lon / 1000000, abs(lon % 1000000));
-  Serial.println(cadenaNum);
+  lat_i = lat / 1000000;
+  lat_f = lat % 1000000;
+  if (lat_f < 0) lat_f = -lat_f;
+  lon_i = lon / 1000000;
+  lon_f = lon % 1000000;
+  if (lon_f < 0) lon_f= -lon_f;
+
+  sprintf_P(bufferTexto, (PGM_P) F("Posicion Actual: LAT = %li.%06li, LON = %li.%06li"), lat_i, lat_f, lon_i, lon_f);
+  Serial.println(bufferTexto);
+
   Serial.println(F("Enviando posicion..."));
+
+  //Se intenta conectar con el servidor
+  strcpy_P(bufferTexto, servidor);
+  while (gprs.connect(bufferTexto, 80) <= 0) {
+    Serial.println(F("\nNo se puede encontrar servidor... "
+                     "reintentando"));
+    delay(2000);
+  }
+  Serial.println(F("Conectado!"));
+
+  strcpy_P(bufferTexto, (PGM_P) F("GET "));
+  strcat_P(bufferTexto, pagina);
+  posBuf = strlen(bufferTexto);
+  sprintf_P(bufferTexto + posBuf, (PGM_P) F("?lat=%li.%06li&lon=%li.%06li HTTP/1.1\nHost: "), lat_i, lat_f,lon_i, lon_f);
+  strcat_P(bufferTexto, servidor);
+  strcat_P(bufferTexto, (PGM_P) F("\n\n"));
+
+  Serial.print(bufferTexto);
+  gprs.print("GET / HTTP/1.0\n\n");
 }
 
